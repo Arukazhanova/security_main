@@ -40,13 +40,22 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint((request, response, authException) ->
-                                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized"))
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            System.out.println("401 FOR: " + request.getMethod() + " " + request.getRequestURI());
+                            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+                        })
                         .accessDeniedHandler((request, response, accessDeniedException) ->
                                 response.sendError(HttpServletResponse.SC_FORBIDDEN, "Forbidden"))
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/ui.html", "/api/auth/**").permitAll()
+                        .requestMatchers("/", "/ui.html", "/error").permitAll()
+                        .requestMatchers("/api/auth/register").permitAll()
+                        .requestMatchers("/api/auth/login").permitAll()
+                        .requestMatchers("/api/auth/verify-email").permitAll()
+                        .requestMatchers("/api/auth/resend-verification").permitAll()
+                        .requestMatchers("/api/auth/forgot-password").permitAll()
+                        .requestMatchers("/api/auth/reset-password").permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authProvider)

@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -24,17 +25,20 @@ public class AuthController {
     private final JwtService jwtService;
     private final AuthenticationManager authManager;
     private final EmailVerificationService emailVerificationService;
+    private final PasswordResetService passwordResetService;
 
     public AuthController(
             UserService userService,
             JwtService jwtService,
             AuthenticationManager authManager,
-            EmailVerificationService emailVerificationService
+            EmailVerificationService emailVerificationService,
+            PasswordResetService passwordResetService
     ) {
         this.userService = userService;
         this.jwtService = jwtService;
         this.authManager = authManager;
         this.emailVerificationService = emailVerificationService;
+        this.passwordResetService = passwordResetService;
     }
 
     public record RegisterRequest(
@@ -50,11 +54,7 @@ public class AuthController {
 
     public record AuthResponse(String token, String type) {}
 
-    public record RegisterResponse(
-            String message,
-            String verificationToken,
-            String verificationUrl
-    ) {}
+    public record RegisterResponse(String message) {}
 
     public record VerificationResponse(
             String message,
@@ -62,16 +62,27 @@ public class AuthController {
             String username
     ) {}
 
+    public record ResendVerificationRequest(
+            @NotBlank @Email String email
+    ) {}
+
+    public record ForgotPasswordRequest(
+            @NotBlank @Email String email
+    ) {}
+
+    public record ResetPasswordRequest(
+            @NotBlank String token,
+            @NotBlank @Size(min = 8, max = 100) String newPassword
+    ) {}
+
+    public record MessageResponse(String message) {}
+
     @PostMapping("/register")
     public RegisterResponse register(@Valid @RequestBody RegisterRequest req) {
+        System.out.println("REGISTER ENDPOINT HIT");
         AppUser user = userService.register(req.username(), req.password(), req.email());
-        EmailVerificationToken verificationToken = emailVerificationService.createToken(user);
-
-        return new RegisterResponse(
-                "Registration successful. Confirm your email before login.",
-                verificationToken.getToken(),
-                "/api/auth/verify-email?token=" + verificationToken.getToken()
-        );
+        emailVerificationService.sendVerificationEmail(user);
+        return new RegisterResponse("Registration successful. Check your email to verify your account.");
     }
 
     @PostMapping("/login")
@@ -85,6 +96,8 @@ public class AuthController {
             return new AuthResponse(token, "Bearer");
         } catch (DisabledException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Email is not verified");
+        } catch (LockedException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "User account is blocked");
         } catch (BadCredentialsException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         }
@@ -94,5 +107,23 @@ public class AuthController {
     public VerificationResponse verifyEmail(@RequestParam String token) {
         AppUser user = emailVerificationService.confirmEmail(token);
         return new VerificationResponse("Email successfully confirmed", true, user.getUsername());
+    }
+
+    @PostMapping("/resend-verification")
+    public MessageResponse resendVerification(@Valid @RequestBody ResendVerificationRequest req) {
+        emailVerificationService.resendVerification(req.email());
+        return new MessageResponse("Verification email sent");
+    }
+
+    @PostMapping("/forgot-password")
+    public MessageResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest req) {
+        passwordResetService.requestReset(req.email());
+        return new MessageResponse("Password reset email sent");
+    }
+
+    @PostMapping("/reset-password")
+    public MessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
+        passwordResetService.resetPassword(req.token(), req.newPassword());
+        return new MessageResponse("Password successfully updated");
     }
 }

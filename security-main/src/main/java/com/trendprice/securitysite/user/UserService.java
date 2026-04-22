@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -27,28 +29,39 @@ public class UserService implements UserDetailsService {
 
     @Transactional
     public AppUser register(String username, String rawPassword, String email) {
-        if (repo.existsByUsername(username)) {
+        String normalizedUsername = username.trim();
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+
+        if (repo.existsByUsername(normalizedUsername)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
         }
-        if (repo.existsByEmail(email)) {
+        if (repo.existsByEmail(normalizedEmail)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already exists");
         }
 
         Role userRole = getOrCreateRole(RoleName.USER);
-        AppUser user = new AppUser(username, email, encoder.encode(rawPassword), Set.of(userRole));
+        AppUser user = new AppUser(
+                normalizedUsername,
+                normalizedEmail,
+                encoder.encode(rawPassword),
+                Set.of(userRole)
+        );
         user.setEmailVerified(false);
         user.setEnabled(false);
+
         return repo.save(user);
     }
 
     @Transactional
     public AppUser register(String username, String rawPassword) {
-        if (repo.existsByUsername(username)) {
+        String normalizedUsername = username.trim();
+
+        if (repo.existsByUsername(normalizedUsername)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
         }
 
         Role userRole = getOrCreateRole(RoleName.USER);
-        AppUser user = new AppUser(username, encoder.encode(rawPassword), Set.of(userRole));
+        AppUser user = new AppUser(normalizedUsername, encoder.encode(rawPassword), Set.of(userRole));
         return repo.save(user);
     }
 
@@ -58,6 +71,18 @@ public class UserService implements UserDetailsService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
     }
 
+    @Transactional(readOnly = true)
+    public AppUser findByEmail(String email) {
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        return repo.findByEmail(normalizedEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<AppUser> findAllUsers() {
+        return repo.findAll();
+    }
+
     @Transactional
     public void enableUser(AppUser user) {
         user.setEmailVerified(true);
@@ -65,11 +90,50 @@ public class UserService implements UserDetailsService {
         repo.save(user);
     }
 
+    @Transactional
+    public void updatePassword(AppUser user, String rawPassword) {
+        user.setPassword(encoder.encode(rawPassword));
+        repo.save(user);
+    }
+
+    @Transactional
+    public void blockUser(Long userId) {
+        AppUser user = repo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        user.setBlocked(true);
+        repo.save(user);
+    }
+
+    @Transactional
+    public void unblockUser(Long userId) {
+        AppUser user = repo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        user.setBlocked(false);
+        repo.save(user);
+    }
+
+    @Transactional
+    public void changeRole(Long userId, String roleName) {
+        AppUser user = repo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        RoleName normalizedRole;
+        try {
+            normalizedRole = RoleName.valueOf(roleName.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown role: " + roleName);
+        }
+
+        Role role = getOrCreateRole(normalizedRole);
+        user.setRoles(Set.of(role));
+        repo.save(user);
+    }
+
     @Transactional(readOnly = true)
     public Set<String> getRoleNames(String username) {
         return findByUsername(username).getRoles().stream()
                 .map(role -> role.getName().name())
-                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     }
 
     @Transactional(readOnly = true)
