@@ -52,7 +52,14 @@ public class AuthController {
             @NotBlank String password
     ) {}
 
-    public record AuthResponse(String token, String type) {}
+    public record AuthResponse(
+            String token,
+            String type,
+            Long userId,
+            String username,
+            String email,
+            java.util.Set<String> roles
+    ) {}
 
     public record RegisterResponse(String message) {}
 
@@ -91,9 +98,22 @@ public class AuthController {
             Authentication auth = authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(req.username(), req.password())
             );
+
             AppUser user = (AppUser) auth.getPrincipal();
-            String token = jwtService.generateToken(user.getUsername());
-            return new AuthResponse(token, "Bearer");
+            String token = jwtService.generateToken(user);
+
+            java.util.Set<String> roles = user.getAuthorities().stream()
+                    .map(authority -> authority.getAuthority())
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+
+            return new AuthResponse(
+                    token,
+                    "Bearer",
+                    user.getId(),
+                    user.getUsername(),
+                    user.getEmail(),
+                    roles
+            );
         } catch (DisabledException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Email is not verified");
         } catch (LockedException ex) {
