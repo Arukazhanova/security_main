@@ -70,7 +70,23 @@ public class UserService implements UserDetailsService {
         return repo.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
     }
+    @Transactional
+    public AppUser updateProfile(
+            String username,
+            String firstName,
+            String lastName,
+            String phoneNumber,
+            String dateOfBirth
+    ) {
+        AppUser user = findByUsername(username);
 
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
+        user.setPhoneNumber(phoneNumber);
+        user.setDateOfBirth(dateOfBirth);
+
+        return repo.save(user);
+    }
     @Transactional(readOnly = true)
     public AppUser findByEmail(String email) {
         String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
