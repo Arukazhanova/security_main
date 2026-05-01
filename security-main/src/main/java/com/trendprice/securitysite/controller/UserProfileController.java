@@ -1,9 +1,11 @@
 package com.trendprice.securitysite.controller;
 
+import com.trendprice.securitysite.dto.ChangePasswordRequest;
 import com.trendprice.securitysite.user.AppUser;
 import com.trendprice.securitysite.user.UserService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,7 +32,6 @@ public class UserProfileController {
     @GetMapping("/me/profile")
     public Map<String, Object> getMyProfile(Authentication authentication) {
         AppUser user = userService.findByUsername(authentication.getName());
-
         return toProfileResponse(user);
     }
 
@@ -50,8 +51,23 @@ public class UserProfileController {
         return toProfileResponse(user);
     }
 
+    @PutMapping("/me/password")
+    public ResponseEntity<?> changePassword(
+            Authentication authentication,
+            @Valid @RequestBody ChangePasswordRequest request
+    ) {
+        userService.changePassword(
+                authentication.getName(),
+                request.currentPassword(),
+                request.newPassword()
+        );
+
+        return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
+    }
+
     private Map<String, Object> toProfileResponse(AppUser user) {
         Map<String, Object> response = new LinkedHashMap<>();
+
         response.put("username", user.getUsername());
         response.put("email", user.getEmail());
         response.put("roles", userService.getRoleNames(user.getUsername()));

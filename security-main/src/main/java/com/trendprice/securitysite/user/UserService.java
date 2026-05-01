@@ -164,6 +164,17 @@ public class UserService implements UserDetailsService {
         return findByUsername(username).getRoles().stream()
                 .anyMatch(role -> role.getName() == normalizedRole);
     }
+    @Transactional
+    public void changePassword(String username, String currentPassword, String newPassword) {
+        AppUser user = findByUsername(username);
+
+        if (!encoder.matches(currentPassword, user.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+        }
+
+        user.setPassword(encoder.encode(newPassword));
+        repo.save(user);
+    }
 
     @Transactional
     public Role getOrCreateRole(RoleName roleName) {
