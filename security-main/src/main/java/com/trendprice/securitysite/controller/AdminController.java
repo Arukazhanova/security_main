@@ -1,9 +1,12 @@
 package com.trendprice.securitysite.controller;
 
-import com.trendprice.securitysite.user.AppUser;
+import com.trendprice.securitysite.dto.admin.AdminUserResponse;
+import com.trendprice.securitysite.dto.admin.ChangeUserRoleRequest;
+import com.trendprice.securitysite.dto.common.MessageResponse;
 import com.trendprice.securitysite.user.UserService;
-import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,50 +22,35 @@ public class AdminController {
         this.userService = userService;
     }
 
-    public record UserSummary(
-            Long id,
-            String username,
-            String email,
-            Boolean emailVerified,
-            Boolean enabled,
-            Boolean blocked,
-            List<String> roles
-    ) {}
-
-    public record ChangeRoleRequest(@NotBlank String role) {}
-
-    public record MessageResponse(String message) {}
-
     @GetMapping("/users")
-    public List<UserSummary> getAllUsers() {
+    public List<AdminUserResponse> getAllUsers() {
         return userService.findAllUsers().stream()
-                .map(user -> new UserSummary(
-                        user.getId(),
-                        user.getUsername(),
-                        user.getEmail(),
-                        user.getEmailVerified(),
-                        user.isEnabled(),
-                        user.getBlocked(),
-                        user.getRoles().stream().map(r -> r.getName().name()).toList()
-                ))
+                .map(AdminUserResponse::from)
                 .toList();
     }
 
     @PatchMapping("/users/{id}/block")
-    public MessageResponse blockUser(@PathVariable Long id) {
-        userService.blockUser(id);
-        return new MessageResponse("User blocked");
+    public MessageResponse blockUser(
+            @PathVariable Long id,
+            Authentication authentication
+    ) {
+        userService.blockUser(id, authentication.getName());
+        return new MessageResponse("User blocked successfully");
     }
 
     @PatchMapping("/users/{id}/unblock")
     public MessageResponse unblockUser(@PathVariable Long id) {
         userService.unblockUser(id);
-        return new MessageResponse("User unblocked");
+        return new MessageResponse("User unblocked successfully");
     }
 
     @PatchMapping("/users/{id}/role")
-    public MessageResponse changeRole(@PathVariable Long id, @RequestBody ChangeRoleRequest req) {
-        userService.changeRole(id, req.role());
-        return new MessageResponse("User role updated");
+    public MessageResponse changeRole(
+            @PathVariable Long id,
+            @Valid @RequestBody ChangeUserRoleRequest request,
+            Authentication authentication
+    ) {
+        userService.changeRole(id, request.role(), authentication.getName());
+        return new MessageResponse("User role updated successfully");
     }
 }

@@ -8,10 +8,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -21,7 +22,11 @@ public class UserService implements UserDetailsService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder encoder;
 
-    public UserService(UserRepository repo, RoleRepository roleRepository, PasswordEncoder encoder) {
+    public UserService(
+            UserRepository repo,
+            RoleRepository roleRepository,
+            PasswordEncoder encoder
+    ) {
         this.repo = repo;
         this.roleRepository = roleRepository;
         this.encoder = encoder;
@@ -35,17 +40,20 @@ public class UserService implements UserDetailsService {
         if (repo.existsByUsername(normalizedUsername)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
         }
+
         if (repo.existsByEmail(normalizedEmail)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already exists");
         }
 
         Role userRole = getOrCreateRole(RoleName.USER);
+
         AppUser user = new AppUser(
                 normalizedUsername,
                 normalizedEmail,
                 encoder.encode(rawPassword),
                 Set.of(userRole)
         );
+
         user.setEmailVerified(false);
         user.setEnabled(false);
 
@@ -61,15 +69,68 @@ public class UserService implements UserDetailsService {
         }
 
         Role userRole = getOrCreateRole(RoleName.USER);
-        AppUser user = new AppUser(normalizedUsername, encoder.encode(rawPassword), Set.of(userRole));
+
+        AppUser user = new AppUser(
+                normalizedUsername,
+                encoder.encode(rawPassword),
+                Set.of(userRole)
+        );
+
         return repo.save(user);
     }
 
     @Transactional(readOnly = true)
     public AppUser findByUsername(String username) {
         return repo.findByUsername(username)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "User not found"
+                ));
     }
+
+    @Transactional(readOnly = true)
+    public AppUser findByEmail(String email) {
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+
+        return repo.findByEmail(normalizedEmail)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "User not found"
+                ));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<AppUser> findOptionalByEmail(String email) {
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        return repo.findByEmail(normalizedEmail);
+    }
+
+    @Transactional(readOnly = true)
+    public AppUser findUserById(Long userId) {
+        return repo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "User not found"
+                ));
+    }
+
+    @Transactional(readOnly = true)
+    public List<AppUser> findAllUsers() {
+        return repo.findAll();
+    }
+
+    @Transactional
+    public AppUser save(AppUser user) {
+        return repo.save(user);
+    }
+
+    @Transactional
+    public void enableUser(AppUser user) {
+        user.setEmailVerified(true);
+        user.setEnabled(true);
+        repo.save(user);
+    }
+
     @Transactional
     public AppUser updateProfile(
             String username,
@@ -87,24 +148,6 @@ public class UserService implements UserDetailsService {
 
         return repo.save(user);
     }
-    @Transactional(readOnly = true)
-    public AppUser findByEmail(String email) {
-        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
-        return repo.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-    }
-
-    @Transactional(readOnly = true)
-    public List<AppUser> findAllUsers() {
-        return repo.findAll();
-    }
-
-    @Transactional
-    public void enableUser(AppUser user) {
-        user.setEmailVerified(true);
-        user.setEnabled(true);
-        repo.save(user);
-    }
 
     @Transactional
     public void updatePassword(AppUser user, String rawPassword) {
@@ -113,38 +156,71 @@ public class UserService implements UserDetailsService {
     }
 
     @Transactional
-    public void blockUser(Long userId) {
-        AppUser user = repo.findById(userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+    public void blockUser(Long userId, String currentAdminUsername) {
+        AppUser user = findUserById(userId);
+
+        if (user.getUsername().equals(currentAdminUsername)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "You cannot block your own account"
+            );
+        }
+
         user.setBlocked(true);
         repo.save(user);
     }
 
     @Transactional
     public void unblockUser(Long userId) {
-        AppUser user = repo.findById(userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        AppUser user = findUserById(userId);
         user.setBlocked(false);
         repo.save(user);
     }
 
     @Transactional
-    public void changeRole(Long userId, String roleName) {
-        AppUser user = repo.findById(userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+    public void changeRole(Long userId, String roleName, String currentAdminUsername) {
+        AppUser user = findUserById(userId);
+        RoleName normalizedRole = parseRoleName(roleName);
 
-        RoleName normalizedRole;
-        try {
-            normalizedRole = RoleName.valueOf(roleName.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown role: " + roleName);
+        if (user.getUsername().equals(currentAdminUsername)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "You cannot change your own role"
+            );
         }
 
-        Role role = getOrCreateRole(normalizedRole);
-        user.setRoles(Set.of(role));
+        boolean userIsAdmin = user.getRoles().stream()
+                .anyMatch(role -> role.getName() == RoleName.ADMIN);
+
+        if (userIsAdmin && normalizedRole == RoleName.USER) {
+            long adminCount = findAllUsers().stream()
+                    .filter(existingUser -> existingUser.getRoles().stream()
+                            .anyMatch(role -> role.getName() == RoleName.ADMIN))
+                    .count();
+
+            if (adminCount <= 1) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Cannot remove the last administrator"
+                );
+            }
+        }
+
+        Role userRole = getOrCreateRole(RoleName.USER);
+
+        Set<Role> newRoles = new HashSet<>();
+        newRoles.add(userRole);
+
+        if (normalizedRole == RoleName.ADMIN) {
+            Role adminRole = getOrCreateRole(RoleName.ADMIN);
+            newRoles.add(adminRole);
+        }
+
+        user.getRoles().clear();
+        user.getRoles().addAll(newRoles);
+
         repo.save(user);
     }
-
     @Transactional(readOnly = true)
     public Set<String> getRoleNames(String username) {
         return findByUsername(username).getRoles().stream()
@@ -154,22 +230,21 @@ public class UserService implements UserDetailsService {
 
     @Transactional(readOnly = true)
     public boolean hasRole(String username, String roleName) {
-        RoleName normalizedRole;
-        try {
-            normalizedRole = RoleName.valueOf(roleName.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown role: " + roleName);
-        }
+        RoleName normalizedRole = parseRoleName(roleName);
 
         return findByUsername(username).getRoles().stream()
                 .anyMatch(role -> role.getName() == normalizedRole);
     }
+
     @Transactional
     public void changePassword(String username, String currentPassword, String newPassword) {
         AppUser user = findByUsername(username);
 
         if (!encoder.matches(currentPassword, user.getPassword())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Current password is incorrect"
+            );
         }
 
         user.setPassword(encoder.encode(newPassword));
@@ -180,6 +255,17 @@ public class UserService implements UserDetailsService {
     public Role getOrCreateRole(RoleName roleName) {
         return roleRepository.findByName(roleName)
                 .orElseGet(() -> roleRepository.save(new Role(roleName)));
+    }
+
+    private RoleName parseRoleName(String roleName) {
+        try {
+            return RoleName.valueOf(roleName.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Unknown role: " + roleName
+            );
+        }
     }
 
     @Override

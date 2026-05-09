@@ -10,11 +10,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class PasswordResetService {
-
+    private final RefreshTokenService refreshTokenService;
     private final PasswordResetTokenRepository tokenRepository;
     private final UserService userService;
     private final MailService mailService;
@@ -24,17 +25,25 @@ public class PasswordResetService {
             PasswordResetTokenRepository tokenRepository,
             UserService userService,
             MailService mailService,
+            RefreshTokenService refreshTokenService,
             @Value("${app.base-url}") String baseUrl
     ) {
         this.tokenRepository = tokenRepository;
         this.userService = userService;
         this.mailService = mailService;
+        this.refreshTokenService = refreshTokenService;
         this.baseUrl = baseUrl;
     }
 
     @Transactional
     public void requestReset(String email) {
-        AppUser user = userService.findByEmail(email);
+        Optional<AppUser> optionalUser = userService.findOptionalByEmail(email);
+
+        if (optionalUser.isEmpty()) {
+            return;
+        }
+
+        AppUser user = optionalUser.get();
 
         tokenRepository.deleteByUser(user);
 
@@ -46,26 +55,42 @@ public class PasswordResetService {
         );
 
         PasswordResetToken saved = tokenRepository.save(token);
+
         String resetLink = baseUrl + "/reset-password?token=" + saved.getToken();
 
-        mailService.sendPasswordResetEmail(user.getEmail(), user.getUsername(), resetLink);
+        mailService.sendPasswordResetEmail(
+                user.getEmail(),
+                user.getUsername(),
+                resetLink
+        );
     }
 
     @Transactional
     public void resetPassword(String tokenValue, String newPassword) {
         PasswordResetToken token = tokenRepository.findByToken(tokenValue)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reset token not found"));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Invalid or expired reset token"
+                ));
 
         if (token.getUsedAt() != null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Reset token already used");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid or expired reset token"
+            );
         }
 
         if (token.getExpiresAt().isBefore(Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Reset token expired");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid or expired reset token"
+            );
         }
 
         AppUser user = token.getUser();
+
         userService.updatePassword(user, newPassword);
+        refreshTokenService.deleteAllByUser(user);
 
         token.setUsedAt(Instant.now());
         tokenRepository.save(token);
