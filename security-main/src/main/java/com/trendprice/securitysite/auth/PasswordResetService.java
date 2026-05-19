@@ -15,6 +15,7 @@ import java.util.UUID;
 
 @Service
 public class PasswordResetService {
+
     private final RefreshTokenService refreshTokenService;
     private final PasswordResetTokenRepository tokenRepository;
     private final UserService userService;
@@ -36,11 +37,11 @@ public class PasswordResetService {
     }
 
     @Transactional
-    public void requestReset(String email) {
+    public Optional<PasswordResetDeliveryResult> requestReset(String email) {
         Optional<AppUser> optionalUser = userService.findOptionalByEmail(email);
 
         if (optionalUser.isEmpty()) {
-            return;
+            return Optional.empty();
         }
 
         AppUser user = optionalUser.get();
@@ -63,6 +64,8 @@ public class PasswordResetService {
                 user.getUsername(),
                 resetLink
         );
+
+        return Optional.of(new PasswordResetDeliveryResult(resetLink, saved.getToken()));
     }
 
     @Transactional
@@ -94,5 +97,8 @@ public class PasswordResetService {
 
         token.setUsedAt(Instant.now());
         tokenRepository.save(token);
+    }
+
+    public record PasswordResetDeliveryResult(String link, String token) {
     }
 }

@@ -47,42 +47,59 @@ public class EmailVerificationService {
     }
 
     @Transactional
-    public void sendVerificationEmail(AppUser user) {
+    public EmailDeliveryResult sendVerificationEmail(AppUser user) {
         EmailVerificationToken token = createToken(user);
         String verificationLink = baseUrl + "/verify-email?token=" + token.getToken();
-        mailService.sendVerificationEmail(user.getEmail(), user.getUsername(), verificationLink);
+
+        mailService.sendVerificationEmail(
+                user.getEmail(),
+                user.getUsername(),
+                verificationLink
+        );
+
+        return new EmailDeliveryResult(verificationLink, token.getToken());
     }
 
     @Transactional
-    public void resendVerification(String email) {
+    public EmailDeliveryResult resendVerification(String email) {
         AppUser user = userService.findByEmail(email);
 
         if (Boolean.TRUE.equals(user.getEmailVerified())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email is already verified");
         }
 
-        sendVerificationEmail(user);
+        return sendVerificationEmail(user);
     }
 
     @Transactional
     public AppUser confirmEmail(String tokenValue) {
         EmailVerificationToken token = tokenRepository.findByToken(tokenValue)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Verification token not found"));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Verification token not found"
+                ));
 
-        // если уже подтверждено — просто считаем это успешным кейсом
         if (token.getConfirmedAt() != null) {
             return token.getUser();
         }
 
         if (token.getExpiresAt().isBefore(Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Verification token expired");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Verification token expired"
+            );
         }
 
         AppUser user = token.getUser();
+
         userService.enableUser(user);
+
         token.setConfirmedAt(Instant.now());
         tokenRepository.save(token);
 
         return user;
+    }
+
+    public record EmailDeliveryResult(String link, String token) {
     }
 }

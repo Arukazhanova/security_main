@@ -3,16 +3,19 @@ package com.trendprice.securitysite.auth;
 import com.trendprice.securitysite.dto.auth.AuthResponse;
 import com.trendprice.securitysite.dto.auth.ForgotPasswordRequest;
 import com.trendprice.securitysite.dto.auth.LoginRequest;
+import com.trendprice.securitysite.dto.auth.RefreshTokenRequest;
 import com.trendprice.securitysite.dto.auth.RegisterRequest;
 import com.trendprice.securitysite.dto.auth.RegisterResponse;
 import com.trendprice.securitysite.dto.auth.ResendVerificationRequest;
 import com.trendprice.securitysite.dto.auth.ResetPasswordRequest;
+import com.trendprice.securitysite.dto.auth.TokenRefreshResponse;
 import com.trendprice.securitysite.dto.auth.VerificationResponse;
 import com.trendprice.securitysite.dto.common.MessageResponse;
 import com.trendprice.securitysite.security.JwtService;
 import com.trendprice.securitysite.user.AppUser;
 import com.trendprice.securitysite.user.UserService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -21,9 +24,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
-
-import com.trendprice.securitysite.dto.auth.RefreshTokenRequest;
-import com.trendprice.securitysite.dto.auth.TokenRefreshResponse;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -35,6 +35,7 @@ public class AuthController {
     private final EmailVerificationService emailVerificationService;
     private final PasswordResetService passwordResetService;
     private final RefreshTokenService refreshTokenService;
+    private final boolean exposeAuthLinksInResponse;
 
     public AuthController(
             UserService userService,
@@ -42,7 +43,8 @@ public class AuthController {
             AuthenticationManager authManager,
             EmailVerificationService emailVerificationService,
             PasswordResetService passwordResetService,
-            RefreshTokenService refreshTokenService
+            RefreshTokenService refreshTokenService,
+            @Value("${app.auth.expose-links-in-response:true}") boolean exposeAuthLinksInResponse
     ) {
         this.userService = userService;
         this.jwtService = jwtService;
@@ -50,6 +52,7 @@ public class AuthController {
         this.emailVerificationService = emailVerificationService;
         this.passwordResetService = passwordResetService;
         this.refreshTokenService = refreshTokenService;
+        this.exposeAuthLinksInResponse = exposeAuthLinksInResponse;
     }
 
     @PostMapping("/register")
@@ -60,10 +63,13 @@ public class AuthController {
                 request.email()
         );
 
-        emailVerificationService.sendVerificationEmail(user);
+        EmailVerificationService.EmailDeliveryResult delivery =
+                emailVerificationService.sendVerificationEmail(user);
 
         return new RegisterResponse(
-                "Registration successful. Check your email to verify your account."
+                "Registration successful. Verification message saved to the local mailbox.",
+                exposeAuthLinksInResponse ? delivery.link() : null,
+                exposeAuthLinksInResponse ? delivery.token() : null
         );
     }
 
@@ -111,20 +117,29 @@ public class AuthController {
     public MessageResponse resendVerification(
             @Valid @RequestBody ResendVerificationRequest request
     ) {
-        emailVerificationService.resendVerification(request.email());
+        EmailVerificationService.EmailDeliveryResult delivery =
+                emailVerificationService.resendVerification(request.email());
 
-        return new MessageResponse("Verification email sent");
+        return new MessageResponse(
+                "Verification message saved to the local mailbox",
+                exposeAuthLinksInResponse ? delivery.link() : null,
+                exposeAuthLinksInResponse ? delivery.token() : null
+        );
     }
 
     @PostMapping("/forgot-password")
     public MessageResponse forgotPassword(
             @Valid @RequestBody ForgotPasswordRequest request
     ) {
-        passwordResetService.requestReset(request.email());
-
-        return new MessageResponse(
-                "If an account with this email exists, password reset instructions have been sent."
-        );
+        return passwordResetService.requestReset(request.email())
+                .map(delivery -> new MessageResponse(
+                        "Password reset message saved to the local mailbox",
+                        exposeAuthLinksInResponse ? delivery.link() : null,
+                        exposeAuthLinksInResponse ? delivery.token() : null
+                ))
+                .orElseGet(() -> new MessageResponse(
+                        "If an account with this email exists, password reset instructions have been saved."
+                ));
     }
 
     @PostMapping("/reset-password")

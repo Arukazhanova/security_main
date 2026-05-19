@@ -74,10 +74,16 @@ public class SecurityConfig {
                                 "/api/auth/logout"
                         ).permitAll()
 
+                        // Local mailbox вместо реальной отправки email
+                        .requestMatchers(
+                                "/api/local-mail",
+                                "/api/local-mail/**"
+                        ).permitAll()
+
                         // Admin endpoints
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // Other endpoints
+                        // Остальные endpoints требуют JWT
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authProvider)
